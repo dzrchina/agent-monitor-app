@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能体监控面板</title>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .agent-card {
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-online {
+            background-color: #4CAF50;
+        }
+        .status-offline {
+            background-color: #F44336;
+        }
+        .status-loading {
+            background-color: #FFC107;
+        }
+        button {
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 4px;
+        }
+        button:disabled {
+            background-color: #BBDEFB;
+            cursor: not-allowed;
+        }
+        .connection-form {
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 8px 0;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>智能体监控面板</h1>
+        
+        <div class="connection-form">
+            <h3>连接设置</h3>
+            <input type="text" id="serverUrl" placeholder="输入服务器地址 (例如: ws://localhost:8080)" />
+            <button onclick="connectToServer()">连接</button>
+            <button onclick="disconnectFromServer()">断开</button>
+            <div>状态: <span id="connectionStatus">未连接</span></div>
+        </div>
+        
+        <div id="agentsContainer">
+            <!-- 智能体会动态加载到这里 -->
+        </div>
+        
+        <div style="margin-top: 20px;">
+            <button onclick="refreshAgents()">刷新状态</button>
+            <button onclick="sendTestCommand()">发送测试指令</button>
+        </div>
+    </div>
+
+    <script>
+        let websocket = null;
+        const agents = {};
+        
+        // 初始化页面
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('serverUrl').value = localStorage.getItem('serverUrl') || '';
+            loadDemoAgents();
+        });
+        
+        function loadDemoAgents() {
+            const container = document.getElementById('agentsContainer');
+            container.innerHTML = `
+                <div class="agent-card">
+                    <div><span class="status-indicator status-loading"></span>tongchou (协调)</div>
+                    <div>状态: <span id="tongchou-status">未知</span></div>
+                    <div>CPU: <span id="tongchou-cpu">-</span>%</div>
+                    <div>内存: <span id="tongchou-memory">-</span>MB</div>
+                    <button onclick="controlAgent('tongchou', 'pause')">暂停</button>
+                    <button onclick="controlAgent('tongchou', 'resume')">恢复</button>
+                    <button onclick="controlAgent('tongchou', 'restart')">重启</button>
+                </div>
+                
+                <div class="agent-card">
+                    <div><span class="status-indicator status-loading"></span>jishu (技术)</div>
+                    <div>状态: <span id="jishu-status">未知</span></div>
+                    <div>CPU: <span id="jishu-cpu">-</span>%</div>
+                    <div>内存: <span id="jishu-memory">-</span>MB</div>
+                    <button onclick="controlAgent('jishu', 'pause')">暂停</button>
+                    <button onclick="controlAgent('jishu', 'resume')">恢复</button>
+                    <button onclick="controlAgent('jishu', 'restart')">重启</button>
+                </div>
+                
+                <div class="agent-card">
+                    <div><span class="status-indicator status-loading"></span>qingbao (情报)</div>
+                    <div>状态: <span id="qingbao-status">未知</span></div>
+                    <div>CPU: <span id="qingbao-cpu">-</span>%</div>
+                    <div>内存: <span id="qingbao-memory">-</span>MB</div>
+                    <button onclick="controlAgent('qingbao', 'pause')">暂停</button>
+                    <button onclick="controlAgent('qingbao', 'resume')">恢复</button>
+                    <button onclick="controlAgent('qingbao', 'restart')">重启</button>
+                </div>
+            `;
+        }
+        
+        function connectToServer() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            if (!serverUrl) {
+                alert('请输入服务器地址');
+                return;
+            }
+            
+            localStorage.setItem('serverUrl', serverUrl);
+            
+            try {
+                websocket = new WebSocket(serverUrl);
+                
+                websocket.onopen = function(event) {
+                    document.getElementById('connectionStatus').textContent = '已连接';
+                    document.getElementById('connectionStatus').style.color = 'green';
+                    console.log('连接已建立');
+                };
+                
+                websocket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        updateAgentStatus(data);
+                    } catch(e) {
+                        console.error('解析消息失败:', e);
+                    }
+                };
+                
+                websocket.onclose = function(event) {
+                    document.getElementById('connectionStatus').textContent = '已断开';
+                    document.getElementById('connectionStatus').style.color = 'red';
+                    console.log('连接已关闭');
+                };
+                
+                websocket.onerror = function(error) {
+                    document.getElementById('connectionStatus').textContent = '连接错误';
+                    document.getElementById('connectionStatus').style.color = 'red';
+                    console.error('WebSocket错误:', error);
+                };
+            } catch(e) {
+                alert('连接失败: ' + e.message);
+            }
+        }
+        
+        function disconnectFromServer() {
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
+            document.getElementById('connectionStatus').textContent = '已断开';
+            document.getElementById('connectionStatus').style.color = 'red';
+        }
+        
+        function updateAgentStatus(data) {
+            for (const [agentId, status] of Object.entries(data)) {
+                const statusElement = document.getElementById(agentId + '-status');
+                const cpuElement = document.getElementById(agentId + '-cpu');
+                const memoryElement = document.getElementById(agentId + '-memory');
+                const indicator = document.querySelector(`#${agentId}-card .status-indicator`);
+                
+                if (statusElement) {
+                    statusElement.textContent = status.status || '未知';
+                    
+                    if (indicator) {
+                        indicator.className = 'status-indicator';
+                        if (status.status === 'running') {
+                            indicator.classList.add('status-online');
+                        } else if (status.status === 'stopped' || status.status === 'offline') {
+                            indicator.classList.add('status-offline');
+                        } else {
+                            indicator.classList.add('status-loading');
+                        }
+                    }
+                }
+                
+                if (cpuElement) cpuElement.textContent = status.cpu || '-';
+                if (memoryElement) memoryElement.textContent = status.memory || '-';
+            }
+        }
+        
+        function refreshAgents() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({type: 'refresh'}));
+            } else {
+                alert('请先连接到服务器');
+            }
+        }
+        
+        function sendTestCommand() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({
+                    type: 'command',
+                    command: 'test',
+                    target: 'all'
+                }));
+            } else {
+                alert('请先连接到服务器');
+            }
+        }
+        
+        function controlAgent(agentId, action) {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({
+                    type: 'control',
+                    agentId: agentId,
+                    action: action
+                }));
+            } else {
+                alert('请先连接到服务器');
+            }
+        }
+    </script>
+</body>
+</html>
